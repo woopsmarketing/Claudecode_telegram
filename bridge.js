@@ -1,28 +1,23 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_CHAT_ID = Number(process.env.ALLOWED_CHAT_ID);
+const PROJECTS_FILE = path.join(__dirname, 'projects.json');
 
-// ── 프로젝트 목록 ──────────────────────────────
-const PROJECTS = {
-  landing: {
-    session: 'claude-landing',
-    root: process.env.PROJECT_LANDING || '/mnt/d/Documents/landing_interior',
-    label: 'landing_interior',
-  },
-  domain: {
-    session: 'claude-domain',
-    root: process.env.PROJECT_DOMAIN || '/mnt/d/Documents/domain_platform',
-    label: 'domain_platform',
-  },
-  bridge: {
-    session: 'claude-bridge',
-    root: process.env.PROJECT_BRIDGE || '/mnt/d/Documents/Claudecode-telegram',
-    label: 'Claudecode-telegram',
-  },
-};
+// ── 프로젝트 목록 동적 로딩 ────────────────────
+function loadProjects() {
+  try {
+    return JSON.parse(fs.readFileSync(PROJECTS_FILE, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+let PROJECTS = loadProjects();
 
 // 현재 활성 프로젝트 (기본: landing)
 let currentProject = process.env.DEFAULT_PROJECT || 'landing';
@@ -224,6 +219,32 @@ bot.onText(/\/stopall/, (msg) => {
         bot.sendMessage(msg.chat.id, `❌ 종료 실패 ${proj.label}: ${e.message}`);
       }
     }
+  }
+});
+
+// /new-project <name> — 새 프로젝트 생성 및 Claude 세션 시작
+bot.onText(/\/new-project\s+(.+)/, async (msg, match) => {
+  if (!guard(msg.chat.id)) return;
+
+  const name = match[1].trim().replace(/[^a-zA-Z0-9_-]/g, '-');
+  const scriptPath = '/mnt/d/Documents/Claudecode-telegram/setup-project.sh';
+
+  bot.sendMessage(msg.chat.id, `🔨 프로젝트 생성 중: ${name}\n잠시 기다려주세요 (약 15초)...`);
+
+  try {
+    const output = wsl(`zsh ${scriptPath} ${name}`);
+    // projects.json 리로드
+    PROJECTS = loadProjects();
+    currentProject = name;
+    bot.sendMessage(msg.chat.id,
+      `✅ 프로젝트 생성 완료!\n\n` +
+      `📁 이름: ${name}\n` +
+      `📂 경로: /mnt/d/Documents/${name}\n` +
+      `🖥 세션: claude-${name}\n\n` +
+      `지금 바로 작업 지시를 입력하세요.`
+    );
+  } catch (e) {
+    bot.sendMessage(msg.chat.id, `❌ 생성 실패: ${e.message.slice(0, 300)}`);
   }
 });
 

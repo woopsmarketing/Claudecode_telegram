@@ -1,0 +1,17 @@
+{
+  "landing": {
+    "session": "claude-landing",
+    "root": "/mnt/d/Documents/landing_interior",
+    "label": "landing_interior"
+  },
+  "domain": {
+    "session": "claude-domain",
+    "root": "/mnt/d/Documents/domain_platform",
+    "label": "domain_platform"
+  },
+  "bridge": {
+    "session": "claude-bridge",
+    "root": "/mnt/d/Documents/Claudecode-telegram",
+    "label": "Claudecode-telegram"
+  }
+}
