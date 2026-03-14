@@ -124,6 +124,11 @@ const mainMenu = {
         { text: '🔍 /review', callback_data: 'cc_review' },
         { text: '❓ /help', callback_data: 'cc_help' },
       ],
+      [
+        { text: '🧠 Opus', callback_data: 'model_1' },
+        { text: '⚡ Sonnet', callback_data: 'model_2' },
+        { text: '🐇 Haiku', callback_data: 'model_3' },
+      ],
     ],
   },
 };
@@ -161,6 +166,18 @@ bot.on('callback_query', async (query) => {
     }
     wsl(`tmux send-keys -t ${proj.session} '${cmd}' Enter`);
     return bot.sendMessage(chatId, `⌨️ [${proj.label}] ${cmd} 전송됨`);
+  }
+
+  // 모델 변경
+  if (data.startsWith('model_')) {
+    const num = data.replace('model_', '');
+    const models = { '1': 'claude-opus-4-6', '2': 'claude-sonnet-4-6', '3': 'claude-haiku-4-5-20251001' };
+    const model = models[num];
+    if (model && sessionExists(proj.session)) {
+      wsl(`tmux send-keys -t ${proj.session} '/model ${model}' Enter`);
+      return bot.sendMessage(chatId, `🤖 모델 변경: ${model}`);
+    }
+    return bot.sendMessage(chatId, `❌ 세션 없음`);
   }
 
   switch (data) {
@@ -413,7 +430,7 @@ bot.onText(/\/new[_-]project(?:\s+(.+))?/, async (msg, match) => {
   );
 
   try {
-    await wslAsync(`zsh ${scriptPath} ${name}`, 60000);
+    await wslAsync(`bash ${scriptPath} ${name}`, 90000);
     PROJECTS = loadProjects();
     currentProject = name;
     bot.sendMessage(msg.chat.id,
@@ -425,6 +442,42 @@ bot.onText(/\/new[_-]project(?:\s+(.+))?/, async (msg, match) => {
     );
   } catch (e) {
     bot.sendMessage(msg.chat.id, `❌ 생성 실패: ${e.message.slice(0, 300)}`);
+  }
+});
+
+// /model <1|2|3> — Claude 모델 변경
+bot.onText(/\/model(?:\s+(\d))?/, (msg, match) => {
+  if (!guard(msg.chat.id)) return;
+
+  const num = match[1];
+  const proj = getProject();
+
+  if (!num) {
+    return bot.sendMessage(msg.chat.id,
+      `모델 선택:\n/model 1 — Opus (가장 강력)\n/model 2 — Sonnet (균형)\n/model 3 — Haiku (빠름)`
+    );
+  }
+
+  const models = {
+    '1': 'claude-opus-4-6',
+    '2': 'claude-sonnet-4-6',
+    '3': 'claude-haiku-4-5-20251001',
+  };
+
+  const model = models[num];
+  if (!model) {
+    return bot.sendMessage(msg.chat.id, `❌ 1, 2, 3 중 선택하세요`);
+  }
+
+  if (!sessionExists(proj.session)) {
+    return bot.sendMessage(msg.chat.id, `❌ 세션 없음: /startclaude 로 시작하세요`);
+  }
+
+  try {
+    wsl(`tmux send-keys -t ${proj.session} '/model ${model}' Enter`);
+    bot.sendMessage(msg.chat.id, `🤖 모델 변경: ${model}`);
+  } catch (e) {
+    bot.sendMessage(msg.chat.id, `❌ 실패: ${e.message}`);
   }
 });
 
