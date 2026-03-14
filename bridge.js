@@ -106,16 +106,30 @@ async function startSession(chatId, proj) {
 const mainMenu = {
   reply_markup: {
     inline_keyboard: [
+      // ── 세션 관리
       [
         { text: '📊 상태확인', callback_data: 'status' },
         { text: '🚀 전체시작', callback_data: 'startall' },
         { text: '🛑 전체종료', callback_data: 'stopall' },
       ],
       [
+        { text: '▶️ 현재시작', callback_data: 'startclaude' },
+        { text: '⏹ 현재종료', callback_data: 'stopclaude' },
         { text: '📋 로그', callback_data: 'logs' },
-        { text: '📁 프로젝트', callback_data: 'project_list' },
+      ],
+      // ── 프로젝트 관리
+      [
+        { text: '📁 프로젝트목록', callback_data: 'project_list' },
+        { text: '🧹 없는것정리', callback_data: 'project_clean' },
         { text: '📸 스크린샷', callback_data: 'screenshot' },
       ],
+      // ── 모델 선택
+      [
+        { text: '🧠 Opus', callback_data: 'model_1' },
+        { text: '⚡ Sonnet', callback_data: 'model_2' },
+        { text: '🐇 Haiku', callback_data: 'model_3' },
+      ],
+      // ── Claude Code 슬래시 명령
       [
         { text: '🔧 /compact', callback_data: 'cc_compact' },
         { text: '📊 /context', callback_data: 'cc_context' },
@@ -126,28 +140,27 @@ const mainMenu = {
         { text: '🔍 /review', callback_data: 'cc_review' },
         { text: '❓ /help', callback_data: 'cc_help' },
       ],
-      [
-        { text: '🧠 Opus', callback_data: 'model_1' },
-        { text: '⚡ Sonnet', callback_data: 'model_2' },
-        { text: '🐇 Haiku', callback_data: 'model_3' },
-      ],
     ],
   },
 };
 
 // ── Bot Commands 등록 (/ 메뉴) ─────────────────
 bot.setMyCommands([
-  { command: 'menu',        description: '버튼 메뉴 열기' },
-  { command: 'status',      description: '전체 세션 상태 확인' },
-  { command: 'startall',    description: '모든 프로젝트 세션 시작' },
-  { command: 'stopall',     description: '모든 세션 종료' },
-  { command: 'startclaude', description: '현재 프로젝트 세션 시작' },
-  { command: 'stopclaude',  description: '현재 프로젝트 세션 종료' },
-  { command: 'project',     description: '프로젝트 목록/전환' },
-  { command: 'logs',        description: '현재 프로젝트 출력 확인' },
-  { command: 'screenshot',  description: '브라우저 스크린샷 전송' },
-  { command: 'ask',         description: '프롬프트 전송 (/ask <내용>)' },
-  { command: 'new_project', description: '새 프로젝트 생성 (/new_project <이름>)' },
+  { command: 'menu',           description: '📱 버튼 메뉴 열기' },
+  { command: 'status',         description: '전체 세션 상태 확인' },
+  { command: 'startall',       description: '모든 프로젝트 세션 시작' },
+  { command: 'stopall',        description: '모든 세션 종료' },
+  { command: 'startclaude',    description: '현재 프로젝트 세션 시작' },
+  { command: 'stopclaude',     description: '현재 프로젝트 세션 종료' },
+  { command: 'project',        description: '프로젝트 목록/전환 (/project <이름>)' },
+  { command: 'logs',           description: '현재 프로젝트 출력 확인' },
+  { command: 'screenshot',     description: '브라우저 스크린샷 전송' },
+  { command: 'ask',            description: '프롬프트 전송 (/ask <내용>)' },
+  { command: 'new_project',    description: '새 프로젝트 생성 (/new_project <이름>)' },
+  { command: 'project_remove', description: '프로젝트 제거 (/project_remove <이름>)' },
+  { command: 'project_add',    description: '기존 폴더 추가 (/project_add <이름>)' },
+  { command: 'project_clean',  description: '없는 폴더 일괄 정리' },
+  { command: 'model',          description: '모델 변경 (/model 1=Opus 2=Sonnet 3=Haiku)' },
 ]);
 
 // ── Inline Keyboard 콜백 처리 ──────────────────
@@ -183,23 +196,51 @@ bot.on('callback_query', async (query) => {
   }
 
   switch (data) {
-    case 'status':
-      handleStatus(chatId);
+    case 'status':       handleStatus(chatId); break;
+    case 'startall':     handleStartAll(chatId); break;
+    case 'stopall':      handleStopAll(chatId); break;
+    case 'logs':         handleLogs(chatId, proj); break;
+    case 'project_list': handleProjectList(chatId); break;
+    case 'screenshot':   handleScreenshot(chatId, proj, null); break;
+    case 'project_clean':
+      // /project-clean 인라인 처리
+      PROJECTS = loadProjects();
+      const removed = [];
+      for (const [k, v] of Object.entries(PROJECTS)) {
+        if (!dirExists(v.root)) {
+          try { wsl(`tmux kill-session -t ${v.session} 2>/dev/null`); } catch {}
+          delete PROJECTS[k];
+          removed.push(k);
+        }
+      }
+      fs.writeFileSync(PROJECTS_FILE, JSON.stringify(PROJECTS, null, 2));
+      if (!PROJECTS[currentProject]) currentProject = Object.keys(PROJECTS)[0] || 'landing';
+      bot.sendMessage(chatId, removed.length === 0
+        ? '✅ 정리할 항목 없음'
+        : `🗑 정리 완료:\n${removed.map(r => `• ${r}`).join('\n')}`
+      );
       break;
-    case 'startall':
-      handleStartAll(chatId);
+    case 'startclaude':
+      if (sessionExists(proj.session)) {
+        bot.sendMessage(chatId, `⚡ 이미 실행 중: ${proj.label}`);
+      } else {
+        bot.sendMessage(chatId, `🚀 시작 중: ${proj.label}...`);
+        startSession(chatId, proj).then(ok => {
+          if (ok) bot.sendMessage(chatId, `✅ ${proj.label} 시작됨`);
+        });
+      }
       break;
-    case 'stopall':
-      handleStopAll(chatId);
-      break;
-    case 'logs':
-      handleLogs(chatId, proj);
-      break;
-    case 'project_list':
-      handleProjectList(chatId);
-      break;
-    case 'screenshot':
-      handleScreenshot(chatId, proj, null);
+    case 'stopclaude':
+      if (!sessionExists(proj.session)) {
+        bot.sendMessage(chatId, `❌ 실행 중인 세션 없음`);
+      } else {
+        try {
+          wsl(`tmux kill-session -t ${proj.session}`);
+          bot.sendMessage(chatId, `🛑 종료: ${proj.label}`);
+        } catch (e) {
+          bot.sendMessage(chatId, `❌ 실패: ${e.message}`);
+        }
+      }
       break;
   }
 });
