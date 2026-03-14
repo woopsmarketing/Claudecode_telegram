@@ -1,11 +1,12 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
-const { execSync } = require('child_process');
+const { execSync, exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_CHAT_ID = Number(process.env.ALLOWED_CHAT_ID);
+const BRIDGE_ROOT = '/mnt/d/Documents/Claudecode-telegram';
 const PROJECTS_FILE = path.join(__dirname, 'projects.json');
 
 // ── 프로젝트 목록 동적 로딩 ────────────────────
@@ -16,34 +17,53 @@ function loadProjects() {
     return {};
   }
 }
-
 let PROJECTS = loadProjects();
-
-// 현재 활성 프로젝트 (기본: landing)
 let currentProject = process.env.DEFAULT_PROJECT || 'landing';
-
 function getProject() {
-  return PROJECTS[currentProject] || PROJECTS.landing;
+  return PROJECTS[currentProject] || Object.values(PROJECTS)[0];
 }
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// ── Helpers ──────────────────────────────────────
+// ── WSL 헬퍼 ─────────────────────────────────
 
+// 일반 명령 (타임아웃 10초)
 function wsl(cmd) {
-  return execSync(`wsl.exe -d Ubuntu -- bash -lc "${cmd.replace(/"/g, '\\"')}"`, {
-    encoding: 'utf-8',
-    timeout: 10000,
-  }).trim();
+  return execSync(
+    `wsl.exe -d Ubuntu -- bash -lc "${cmd.replace(/"/g, '\\"')}"`,
+    { encoding: 'utf-8', timeout: 10000 }
+  ).trim();
+}
+
+// Node/nvm 필요한 명령 (nvm 자동 로드, 타임아웃 30초)
+function wslNode(cmd) {
+  const withNvm = `export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && ${cmd}`;
+  return execSync(
+    `wsl.exe -d Ubuntu -- bash -lc "${withNvm.replace(/"/g, '\\"')}"`,
+    { encoding: 'utf-8', timeout: 30000 }
+  ).trim();
+}
+
+// 오래 걸리는 비동기 명령 (타임아웃 설정 가능)
+function wslAsync(cmd, timeout = 90000) {
+  const withNvm = `export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && ${cmd}`;
+  return new Promise((resolve, reject) => {
+    exec(
+      `wsl.exe -d Ubuntu -- bash -lc "${withNvm.replace(/"/g, '\\"')}"`,
+      { encoding: 'utf-8', timeout },
+      (err, stdout) => {
+        if (err) reject(err);
+        else resolve(stdout.trim());
+      }
+    );
+  });
 }
 
 function sessionExists(session) {
   try {
     wsl(`tmux has-session -t ${session} 2>/dev/null`);
     return true;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 function guard(chatId) {
@@ -52,106 +72,307 @@ function guard(chatId) {
 
 function sendLong(chatId, text) {
   const MAX = 4000;
-  if (!text || text.length === 0) {
-    return bot.sendMessage(chatId, '(빈 응답)');
-  }
+  if (!text || text.length === 0) return bot.sendMessage(chatId, '(빈 응답)');
   const chunks = [];
-  for (let i = 0; i < text.length; i += MAX) {
-    chunks.push(text.slice(i, i + MAX));
-  }
-  return chunks.reduce(
-    (p, chunk) => p.then(() => bot.sendMessage(chatId, chunk)),
-    Promise.resolve()
-  );
+  for (let i = 0; i < text.length; i += MAX) chunks.push(text.slice(i, i + MAX));
+  return chunks.reduce((p, chunk) => p.then(() => bot.sendMessage(chatId, chunk)), Promise.resolve());
 }
 
 async function startSession(chatId, proj) {
   try {
     wsl(`tmux new-session -d -s ${proj.session} -c ${proj.root} zsh -l`);
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 2000));
     wsl(`tmux send-keys -t ${proj.session} 'claude' Enter`);
+    await new Promise(r => setTimeout(r, 8000));
+    // trust this folder 프롬프트 자동 수락
+    wsl(`tmux send-keys -t ${proj.session} '' Enter`);
+    await new Promise(r => setTimeout(r, 2000));
     return true;
   } catch (e) {
-    bot.sendMessage(chatId, `❌ 세션 시작 실패: ${e.message}`);
+    if (chatId) bot.sendMessage(chatId, `❌ 세션 시작 실패: ${e.message}`);
     return false;
   }
 }
 
-// ── Commands ─────────────────────────────────────
+// ── 메인 메뉴 키보드 ──────────────────────────
+const mainMenu = {
+  reply_markup: {
+    inline_keyboard: [
+      [
+        { text: '📊 상태확인', callback_data: 'status' },
+        { text: '🚀 전체시작', callback_data: 'startall' },
+        { text: '🛑 전체종료', callback_data: 'stopall' },
+      ],
+      [
+        { text: '📋 로그', callback_data: 'logs' },
+        { text: '📁 프로젝트', callback_data: 'project_list' },
+        { text: '📸 스크린샷', callback_data: 'screenshot' },
+      ],
+      [
+        { text: '🔧 /compact', callback_data: 'cc_compact' },
+        { text: '📊 /context', callback_data: 'cc_context' },
+        { text: '🧹 /clear', callback_data: 'cc_clear' },
+      ],
+      [
+        { text: '↩️ /undo', callback_data: 'cc_undo' },
+        { text: '🔍 /review', callback_data: 'cc_review' },
+        { text: '❓ /help', callback_data: 'cc_help' },
+      ],
+    ],
+  },
+};
 
-// /project <name> — 활성 프로젝트 전환
-bot.onText(/\/project(?:\s+(.+))?/, (msg, match) => {
-  if (!guard(msg.chat.id)) return;
+// ── Bot Commands 등록 (/ 메뉴) ─────────────────
+bot.setMyCommands([
+  { command: 'menu',        description: '버튼 메뉴 열기' },
+  { command: 'status',      description: '전체 세션 상태 확인' },
+  { command: 'startall',    description: '모든 프로젝트 세션 시작' },
+  { command: 'stopall',     description: '모든 세션 종료' },
+  { command: 'startclaude', description: '현재 프로젝트 세션 시작' },
+  { command: 'stopclaude',  description: '현재 프로젝트 세션 종료' },
+  { command: 'project',     description: '프로젝트 목록/전환' },
+  { command: 'logs',        description: '현재 프로젝트 출력 확인' },
+  { command: 'screenshot',  description: '브라우저 스크린샷 전송' },
+  { command: 'ask',         description: '프롬프트 전송 (/ask <내용>)' },
+  { command: 'new_project', description: '새 프로젝트 생성 (/new_project <이름>)' },
+]);
 
-  const name = match[1]?.trim().toLowerCase();
+// ── Inline Keyboard 콜백 처리 ──────────────────
+bot.on('callback_query', async (query) => {
+  if (!guard(query.message.chat.id)) return;
 
-  if (!name) {
-    const list = Object.entries(PROJECTS)
-      .map(([k, v]) => `${k === currentProject ? '▶' : '  '} ${k} — ${v.label}`)
-      .join('\n');
-    return bot.sendMessage(msg.chat.id, `📁 프로젝트 목록:\n${list}\n\n전환: /project <이름>`);
-  }
-
-  if (!PROJECTS[name]) {
-    const keys = Object.keys(PROJECTS).join(', ');
-    return bot.sendMessage(msg.chat.id, `❌ 없는 프로젝트. 사용 가능: ${keys}`);
-  }
-
-  currentProject = name;
+  const chatId = query.message.chat.id;
+  const data = query.data;
   const proj = getProject();
-  bot.sendMessage(msg.chat.id, `✅ 프로젝트 전환: ${proj.label}\n세션: ${proj.session}\n경로: ${proj.root}`);
+
+  bot.answerCallbackQuery(query.id);
+
+  // Claude Code 슬래시 명령
+  if (data.startsWith('cc_')) {
+    const cmd = '/' + data.replace('cc_', '');
+    if (!sessionExists(proj.session)) {
+      return bot.sendMessage(chatId, `❌ 세션 없음: /startclaude 로 먼저 시작하세요`);
+    }
+    wsl(`tmux send-keys -t ${proj.session} '${cmd}' Enter`);
+    return bot.sendMessage(chatId, `⌨️ [${proj.label}] ${cmd} 전송됨`);
+  }
+
+  switch (data) {
+    case 'status':
+      handleStatus(chatId);
+      break;
+    case 'startall':
+      handleStartAll(chatId);
+      break;
+    case 'stopall':
+      handleStopAll(chatId);
+      break;
+    case 'logs':
+      handleLogs(chatId, proj);
+      break;
+    case 'project_list':
+      handleProjectList(chatId);
+      break;
+    case 'screenshot':
+      handleScreenshot(chatId, proj, null);
+      break;
+  }
 });
 
-// /status — 전체 세션 상태
-bot.onText(/\/status/, (msg) => {
-  if (!guard(msg.chat.id)) return;
+// ── 공통 핸들러 함수 ──────────────────────────
 
+function handleStatus(chatId) {
+  PROJECTS = loadProjects();
   const lines = Object.entries(PROJECTS).map(([k, v]) => {
     const running = sessionExists(v.session);
     const active = k === currentProject ? ' ◀ 현재' : '';
     return `${running ? '✅' : '❌'} ${k} (${v.label})${active}`;
   });
+  bot.sendMessage(chatId, `세션 상태:\n${lines.join('\n')}`);
+}
 
-  bot.sendMessage(msg.chat.id, `세션 상태:\n${lines.join('\n')}`);
+async function handleStartAll(chatId) {
+  PROJECTS = loadProjects();
+  for (const [key, proj] of Object.entries(PROJECTS)) {
+    if (sessionExists(proj.session)) {
+      bot.sendMessage(chatId, `⚡ 이미 실행 중: ${proj.label}`);
+      continue;
+    }
+    bot.sendMessage(chatId, `🚀 시작 중: ${proj.label}...`);
+    const ok = await startSession(chatId, proj);
+    if (ok) bot.sendMessage(chatId, `✅ ${proj.label} 준비 완료`);
+  }
+}
+
+function handleStopAll(chatId) {
+  PROJECTS = loadProjects();
+  for (const [, proj] of Object.entries(PROJECTS)) {
+    if (sessionExists(proj.session)) {
+      try {
+        wsl(`tmux kill-session -t ${proj.session}`);
+        bot.sendMessage(chatId, `🛑 종료: ${proj.label}`);
+      } catch (e) {
+        bot.sendMessage(chatId, `❌ 종료 실패 ${proj.label}: ${e.message}`);
+      }
+    }
+  }
+}
+
+function handleLogs(chatId, proj) {
+  if (!sessionExists(proj.session)) {
+    return bot.sendMessage(chatId, `❌ 실행 중인 세션 없음: ${proj.label}`);
+  }
+  try {
+    const logs = wsl(`tmux capture-pane -t ${proj.session} -p -S -80`);
+    sendLong(chatId, `[${proj.label}]\n${logs || '(출력 없음)'}`);
+  } catch (e) {
+    bot.sendMessage(chatId, `❌ 로그 실패: ${e.message}`);
+  }
+}
+
+function handleProjectList(chatId) {
+  PROJECTS = loadProjects();
+  const list = Object.entries(PROJECTS)
+    .map(([k, v]) => `${k === currentProject ? '▶' : '  '} ${k} — ${v.label}`)
+    .join('\n');
+
+  const projectButtons = Object.keys(PROJECTS).map(k => ({
+    text: `${k === currentProject ? '▶ ' : ''}${k}`,
+    callback_data: `switch_${k}`,
+  }));
+
+  const rows = [];
+  for (let i = 0; i < projectButtons.length; i += 3) {
+    rows.push(projectButtons.slice(i, i + 3));
+  }
+
+  bot.sendMessage(chatId, `📁 프로젝트 목록:\n${list}`, {
+    reply_markup: { inline_keyboard: rows },
+  });
+}
+
+async function handleScreenshot(chatId, proj, customUrl) {
+  // 현재 프로젝트의 기본 URL
+  const url = customUrl ||
+    process.env[`SCREENSHOT_URL_${currentProject.toUpperCase()}`] ||
+    'http://localhost:3000';
+
+  bot.sendMessage(chatId, `📸 스크린샷 준비 중...\n${url}`);
+
+  // dev server 실행 여부 확인 & 미실행 시 자동 시작
+  try {
+    wslNode(`node -e "require('http').get('${url}', r => process.exit(0)).on('error', () => process.exit(1))"`);
+  } catch {
+    // 서버 없으면 dev server 시작
+    bot.sendMessage(chatId, `⚙️ dev server 없음. 시작 중...`);
+    if (sessionExists(proj.session)) {
+      wsl(`tmux send-keys -t ${proj.session} 'npm run dev 2>/dev/null || pnpm dev 2>/dev/null || npx next dev &' Enter`);
+      await new Promise(r => setTimeout(r, 8000));
+    } else {
+      return bot.sendMessage(chatId, `❌ 세션이 없습니다. /startclaude 먼저 실행하세요.`);
+    }
+  }
+
+  try {
+    await wslAsync(
+      `node ${BRIDGE_ROOT}/screenshot.js '${url}' '📸 ${proj.label}'`,
+      30000
+    );
+    // screenshot.js가 직접 Telegram으로 이미지 전송
+  } catch (e) {
+    bot.sendMessage(chatId, `❌ 스크린샷 실패: ${e.message.slice(0, 200)}`);
+  }
+}
+
+// ── 프로젝트 전환 콜백 ─────────────────────────
+bot.on('callback_query', async (query) => {
+  if (!guard(query.message.chat.id)) return;
+  if (!query.data.startsWith('switch_')) return;
+
+  const key = query.data.replace('switch_', '');
+  PROJECTS = loadProjects();
+
+  if (!PROJECTS[key]) return;
+  currentProject = key;
+  const proj = PROJECTS[key];
+  bot.answerCallbackQuery(query.id, { text: `전환: ${proj.label}` });
+  bot.sendMessage(query.message.chat.id,
+    `✅ 전환: ${proj.label}\n세션: ${proj.session}\n경로: ${proj.root}`
+  );
 });
 
-// /startclaude — 현재 프로젝트 세션 시작
+// ── Commands ─────────────────────────────────────
+
+bot.onText(/\/menu/, (msg) => {
+  if (!guard(msg.chat.id)) return;
+  const proj = getProject();
+  bot.sendMessage(msg.chat.id, `🤖 Claude Bridge\n현재: ${proj.label}`, mainMenu);
+});
+
+bot.onText(/\/status/, (msg) => {
+  if (!guard(msg.chat.id)) return;
+  handleStatus(msg.chat.id);
+});
+
+bot.onText(/\/project(?:\s+(.+))?/, (msg, match) => {
+  if (!guard(msg.chat.id)) return;
+  const name = match[1]?.trim().toLowerCase();
+
+  if (!name) return handleProjectList(msg.chat.id);
+
+  PROJECTS = loadProjects();
+  if (!PROJECTS[name]) {
+    return bot.sendMessage(msg.chat.id, `❌ 없는 프로젝트. /project 로 목록 확인`);
+  }
+  currentProject = name;
+  const proj = PROJECTS[name];
+  bot.sendMessage(msg.chat.id,
+    `✅ 전환: ${proj.label}\n세션: ${proj.session}\n경로: ${proj.root}`
+  );
+});
+
 bot.onText(/\/startclaude/, async (msg) => {
   if (!guard(msg.chat.id)) return;
-
   const proj = getProject();
   if (sessionExists(proj.session)) {
     return bot.sendMessage(msg.chat.id, `⚡ 이미 실행 중: ${proj.label}`);
   }
-
   bot.sendMessage(msg.chat.id, `🚀 시작 중: ${proj.label}...`);
   const ok = await startSession(msg.chat.id, proj);
-  if (ok) {
-    bot.sendMessage(msg.chat.id, `✅ Claude 시작됨 (bypass mode)\n프로젝트: ${proj.label}`);
-  }
+  if (ok) bot.sendMessage(msg.chat.id, `✅ Claude 시작됨\n프로젝트: ${proj.label}`);
 });
 
-// /stopclaude — 현재 프로젝트 세션 종료
 bot.onText(/\/stopclaude/, (msg) => {
   if (!guard(msg.chat.id)) return;
-
   const proj = getProject();
   if (!sessionExists(proj.session)) {
-    return bot.sendMessage(msg.chat.id, `❌ 실행 중인 세션 없음: ${proj.label}`);
+    return bot.sendMessage(msg.chat.id, `❌ 실행 중인 세션 없음`);
   }
-
   try {
     wsl(`tmux kill-session -t ${proj.session}`);
-    bot.sendMessage(msg.chat.id, `🛑 세션 종료: ${proj.label}`);
+    bot.sendMessage(msg.chat.id, `🛑 종료: ${proj.label}`);
   } catch (e) {
-    bot.sendMessage(msg.chat.id, `❌ 종료 실패: ${e.message}`);
+    bot.sendMessage(msg.chat.id, `❌ 실패: ${e.message}`);
   }
 });
 
-// /ask <message>
+bot.onText(/\/startall/, (msg) => {
+  if (!guard(msg.chat.id)) return;
+  handleStartAll(msg.chat.id);
+});
+
+bot.onText(/\/stopall/, (msg) => {
+  if (!guard(msg.chat.id)) return;
+  handleStopAll(msg.chat.id);
+});
+
+bot.onText(/\/logs/, (msg) => {
+  if (!guard(msg.chat.id)) return;
+  handleLogs(msg.chat.id, getProject());
+});
+
 bot.onText(/\/ask (.+)/, async (msg, match) => {
   if (!guard(msg.chat.id)) return;
-
   const prompt = match[1];
   const proj = getProject();
 
@@ -159,7 +380,6 @@ bot.onText(/\/ask (.+)/, async (msg, match) => {
     bot.sendMessage(msg.chat.id, `🚀 세션 자동 시작: ${proj.label}...`);
     const ok = await startSession(msg.chat.id, proj);
     if (!ok) return;
-    await new Promise(r => setTimeout(r, 8000)); // claude 초기화 대기
   }
 
   try {
@@ -171,69 +391,24 @@ bot.onText(/\/ask (.+)/, async (msg, match) => {
   }
 });
 
-// /logs — 현재 프로젝트 최근 출력
-bot.onText(/\/logs/, (msg) => {
+// /new_project 또는 /new-project
+bot.onText(/\/new[_-]project(?:\s+(.+))?/, async (msg, match) => {
   if (!guard(msg.chat.id)) return;
 
-  const proj = getProject();
-  if (!sessionExists(proj.session)) {
-    return bot.sendMessage(msg.chat.id, `❌ 실행 중인 세션 없음: ${proj.label}`);
+  const rawName = match[1]?.trim();
+  if (!rawName) {
+    return bot.sendMessage(msg.chat.id, `❌ 이름 필요: /new_project <프로젝트이름>`);
   }
+
+  const name = rawName.replace(/[^a-zA-Z0-9_-]/g, '-');
+  const scriptPath = `${BRIDGE_ROOT}/setup-project.sh`;
+
+  bot.sendMessage(msg.chat.id,
+    `🔨 프로젝트 생성 중: ${name}\n⏳ 약 20초 소요...`
+  );
 
   try {
-    const logs = wsl(`tmux capture-pane -t ${proj.session} -p -S -80`);
-    sendLong(msg.chat.id, `[${proj.label}]\n${logs || '(출력 없음)'}`);
-  } catch (e) {
-    bot.sendMessage(msg.chat.id, `❌ 로그 조회 실패: ${e.message}`);
-  }
-});
-
-// /startall — 모든 프로젝트 세션 시작
-bot.onText(/\/startall/, async (msg) => {
-  if (!guard(msg.chat.id)) return;
-
-  for (const [key, proj] of Object.entries(PROJECTS)) {
-    if (sessionExists(proj.session)) {
-      bot.sendMessage(msg.chat.id, `⚡ 이미 실행 중: ${proj.label}`);
-      continue;
-    }
-    bot.sendMessage(msg.chat.id, `🚀 시작 중: ${proj.label}...`);
-    const ok = await startSession(msg.chat.id, proj);
-    if (ok) {
-      await new Promise(r => setTimeout(r, 8000)); // claude 초기화 대기
-      bot.sendMessage(msg.chat.id, `✅ ${proj.label} 준비 완료`);
-    }
-  }
-});
-
-// /stopall — 모든 세션 종료
-bot.onText(/\/stopall/, (msg) => {
-  if (!guard(msg.chat.id)) return;
-
-  for (const [key, proj] of Object.entries(PROJECTS)) {
-    if (sessionExists(proj.session)) {
-      try {
-        wsl(`tmux kill-session -t ${proj.session}`);
-        bot.sendMessage(msg.chat.id, `🛑 종료: ${proj.label}`);
-      } catch (e) {
-        bot.sendMessage(msg.chat.id, `❌ 종료 실패 ${proj.label}: ${e.message}`);
-      }
-    }
-  }
-});
-
-// /new-project <name> — 새 프로젝트 생성 및 Claude 세션 시작
-bot.onText(/\/new-project\s+(.+)/, async (msg, match) => {
-  if (!guard(msg.chat.id)) return;
-
-  const name = match[1].trim().replace(/[^a-zA-Z0-9_-]/g, '-');
-  const scriptPath = '/mnt/d/Documents/Claudecode-telegram/setup-project.sh';
-
-  bot.sendMessage(msg.chat.id, `🔨 프로젝트 생성 중: ${name}\n잠시 기다려주세요 (약 15초)...`);
-
-  try {
-    const output = wsl(`zsh ${scriptPath} ${name}`);
-    // projects.json 리로드
+    await wslAsync(`zsh ${scriptPath} ${name}`, 60000);
     PROJECTS = loadProjects();
     currentProject = name;
     bot.sendMessage(msg.chat.id,
@@ -248,33 +423,35 @@ bot.onText(/\/new-project\s+(.+)/, async (msg, match) => {
   }
 });
 
-// /screenshot [url] — 스크린샷 찍어서 Telegram 전송
 bot.onText(/\/screenshot(?:\s+(.+))?/, async (msg, match) => {
   if (!guard(msg.chat.id)) return;
-
-  const url = match[1]?.trim() || process.env[`SCREENSHOT_URL_${currentProject.toUpperCase()}`] || 'http://localhost:3000';
-  const proj = getProject();
-
-  bot.sendMessage(msg.chat.id, `📸 스크린샷 촬영 중...\n${url}`);
-
-  try {
-    wsl(`node /mnt/d/Documents/Claudecode-telegram/screenshot.js '${url}' '📸 ${proj.label}'`);
-    // screenshot.js가 직접 Telegram에 이미지 전송함
-  } catch (e) {
-    bot.sendMessage(msg.chat.id, `❌ 스크린샷 실패: ${e.message}`);
-  }
+  handleScreenshot(msg.chat.id, getProject(), match[1]?.trim() || null);
 });
 
-// 일반 텍스트 → 현재 프로젝트로 전송
+// // 접두사 → Claude 슬래시 명령 (//context, //compact 등)
 bot.on('message', async (msg) => {
   if (!guard(msg.chat.id)) return;
-  if (msg.text && msg.text.startsWith('/')) return;
+  if (!msg.text) return;
 
-  const prompt = msg.text;
-  if (!prompt) return;
+  const text = msg.text;
 
+  // //명령어 → Claude Code 내부 슬래시 명령으로 전달
+  if (text.startsWith('//')) {
+    const claudeCmd = text.slice(1); // // → /
+    const proj = getProject();
+    if (!sessionExists(proj.session)) {
+      return bot.sendMessage(msg.chat.id, `❌ 세션 없음: /startclaude 로 시작하세요`);
+    }
+    const escaped = claudeCmd.replace(/'/g, "'\\''");
+    wsl(`tmux send-keys -t ${proj.session} '${escaped}' Enter`);
+    return bot.sendMessage(msg.chat.id, `⌨️ [${proj.label}] ${claudeCmd}`);
+  }
+
+  // 일반 / 명령은 스킵 (위 핸들러에서 처리)
+  if (text.startsWith('/')) return;
+
+  // 일반 텍스트 → 현재 프로젝트로 전송
   const proj = getProject();
-
   if (!sessionExists(proj.session)) {
     return bot.sendMessage(msg.chat.id,
       `❌ [${proj.label}] 세션 없음\n/startclaude 또는 /startall 로 시작하세요`
@@ -282,16 +459,15 @@ bot.on('message', async (msg) => {
   }
 
   try {
-    const escaped = prompt.replace(/'/g, "'\\''");
+    const escaped = text.replace(/'/g, "'\\''");
     wsl(`tmux send-keys -t ${proj.session} '${escaped}' Enter`);
-    bot.sendMessage(msg.chat.id, `📨 [${proj.label}] ${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}`);
+    bot.sendMessage(msg.chat.id, `📨 [${proj.label}] ${text.slice(0, 80)}${text.length > 80 ? '...' : ''}`);
   } catch (e) {
     bot.sendMessage(msg.chat.id, `❌ 전송 실패: ${e.message}`);
   }
 });
 
 // ── Startup ──────────────────────────────────────
-
 console.log('🤖 Telegram-Claude Bridge started');
 console.log('   프로젝트:');
 for (const [k, v] of Object.entries(PROJECTS)) {

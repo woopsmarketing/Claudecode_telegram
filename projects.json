@@ -13,5 +13,20 @@
     "session": "claude-bridge",
     "root": "/mnt/d/Documents/Claudecode-telegram",
     "label": "Claudecode-telegram"
+  },
+  "Telegram-assistant": {
+    "session": "claude-Telegram-assistant",
+    "root": "/mnt/d/Documents/Telegram-assistant",
+    "label": "Telegram-assistant"
+  },
+  "telegram-assistant": {
+    "session": "claude-telegram-assistant",
+    "root": "/mnt/d/Documents/telegram-assistant",
+    "label": "telegram-assistant"
+  },
+  "crawl-everything": {
+    "session": "claude-crawl-everything",
+    "root": "/mnt/d/Documents/crawl-everything",
+    "label": "crawl-everything"
   }
 }
