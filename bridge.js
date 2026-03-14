@@ -1,6 +1,6 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
-const { execSync, exec } = require('child_process');
+const { execSync, exec, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -441,7 +441,15 @@ bot.onText(/\/new[_-]project(?:\s+(.+))?/, async (msg, match) => {
   );
 
   try {
-    await wslAsync(`bash ${scriptPath} ${name}`, 90000);
+    await new Promise((resolve, reject) => {
+      execFile('wsl.exe', ['-d', 'Ubuntu', '--', 'bash', scriptPath, name],
+        { encoding: 'utf-8', timeout: 90000 },
+        (err, stdout, stderr) => {
+          if (err) reject(new Error(stderr || err.message));
+          else resolve(stdout);
+        }
+      );
+    });
     PROJECTS = loadProjects();
     currentProject = name;
     bot.sendMessage(msg.chat.id,
