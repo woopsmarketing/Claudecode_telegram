@@ -66,6 +66,12 @@ function sessionExists(session) {
   } catch { return false; }
 }
 
+// 줄바꿈/특수문자 포함 텍스트를 tmux로 안전하게 전송 (base64 경유)
+function sendToSession(session, text) {
+  const b64 = Buffer.from(text, 'utf-8').toString('base64');
+  wsl(`echo '${b64}' | base64 -d > /tmp/cm.txt && tmux load-buffer /tmp/cm.txt && tmux paste-buffer -t ${session} && tmux send-keys -t ${session} '' Enter && rm /tmp/cm.txt`);
+}
+
 function guard(chatId) {
   return chatId === ALLOWED_CHAT_ID;
 }
@@ -383,8 +389,7 @@ bot.onText(/\/ask (.+)/, async (msg, match) => {
   }
 
   try {
-    const escaped = prompt.replace(/'/g, "'\\''");
-    wsl(`tmux send-keys -t ${proj.session} '${escaped}' Enter`);
+    sendToSession(proj.session, prompt);
     bot.sendMessage(msg.chat.id, `📨 [${proj.label}] ${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}`);
   } catch (e) {
     bot.sendMessage(msg.chat.id, `❌ 전송 실패: ${e.message}`);
@@ -459,8 +464,7 @@ bot.on('message', async (msg) => {
   }
 
   try {
-    const escaped = text.replace(/'/g, "'\\''");
-    wsl(`tmux send-keys -t ${proj.session} '${escaped}' Enter`);
+    sendToSession(proj.session, text);
     bot.sendMessage(msg.chat.id, `📨 [${proj.label}] ${text.slice(0, 80)}${text.length > 80 ? '...' : ''}`);
   } catch (e) {
     bot.sendMessage(msg.chat.id, `❌ 전송 실패: ${e.message}`);
