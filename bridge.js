@@ -44,16 +44,18 @@ function wslNode(cmd) {
   ).trim();
 }
 
-// 오래 걸리는 비동기 명령 (타임아웃 설정 가능)
+// 오래 걸리는 비동기 명령 (타임아웃 설정 가능, stderr 포함)
 function wslAsync(cmd, timeout = 90000) {
   const withNvm = `export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && ${cmd}`;
   return new Promise((resolve, reject) => {
     exec(
       `wsl.exe -d Ubuntu -- bash -lc "${withNvm.replace(/"/g, '\\"')}"`,
       { encoding: 'utf-8', timeout },
-      (err, stdout) => {
-        if (err) reject(err);
-        else resolve(stdout.trim());
+      (err, stdout, stderr) => {
+        if (err) {
+          const detail = (stderr || err.message || '').slice(0, 400);
+          reject(new Error(detail));
+        } else resolve(stdout.trim());
       }
     );
   });
@@ -204,14 +206,23 @@ bot.on('callback_query', async (query) => {
 
 // ── 공통 핸들러 함수 ──────────────────────────
 
+function dirExists(wslPath) {
+  try {
+    wsl(`[ -d "${wslPath}" ] && echo yes`);
+    return true;
+  } catch { return false; }
+}
+
 function handleStatus(chatId) {
   PROJECTS = loadProjects();
   const lines = Object.entries(PROJECTS).map(([k, v]) => {
     const running = sessionExists(v.session);
+    const exists = dirExists(v.root);
     const active = k === currentProject ? ' ◀ 현재' : '';
-    return `${running ? '✅' : '❌'} ${k} (${v.label})${active}`;
+    const warn = !exists ? ' ⚠️없음' : '';
+    return `${running ? '✅' : '❌'} ${k} (${v.label})${warn}${active}`;
   });
-  bot.sendMessage(chatId, `세션 상태:\n${lines.join('\n')}`);
+  bot.sendMessage(chatId, `세션 상태:\n${lines.join('\n')}\n\n⚠️없음 = 폴더 삭제됨 (/project-remove <이름> 으로 정리)`);
 }
 
 async function handleStartAll(chatId) {
@@ -442,6 +453,71 @@ bot.onText(/\/new[_-]project(?:\s+(.+))?/, async (msg, match) => {
     );
   } catch (e) {
     bot.sendMessage(msg.chat.id, `❌ 생성 실패: ${e.message.slice(0, 300)}`);
+  }
+});
+
+// /project-remove <name> — projects.json에서 제거
+bot.onText(/\/project-remove\s+(.+)/, (msg, match) => {
+  if (!guard(msg.chat.id)) return;
+  const name = match[1].trim();
+  PROJECTS = loadProjects();
+
+  if (!PROJECTS[name]) {
+    return bot.sendMessage(msg.chat.id, `❌ 없는 프로젝트: ${name}`);
+  }
+
+  // 세션 종료
+  const session = PROJECTS[name].session;
+  try { wsl(`tmux kill-session -t ${session} 2>/dev/null`); } catch {}
+
+  delete PROJECTS[name];
+  fs.writeFileSync(PROJECTS_FILE, JSON.stringify(PROJECTS, null, 2));
+
+  if (currentProject === name) currentProject = Object.keys(PROJECTS)[0] || 'landing';
+  bot.sendMessage(msg.chat.id, `🗑 제거됨: ${name}\n현재 프로젝트: ${currentProject}`);
+});
+
+// /project-add <name> — 기존 폴더를 projects.json에 추가
+bot.onText(/\/project-add\s+(.+)/, (msg, match) => {
+  if (!guard(msg.chat.id)) return;
+  const name = match[1].trim();
+  const root = `/mnt/d/Documents/${name}`;
+  PROJECTS = loadProjects();
+
+  if (PROJECTS[name]) {
+    return bot.sendMessage(msg.chat.id, `⚠️ 이미 존재: ${name}`);
+  }
+
+  if (!dirExists(root)) {
+    return bot.sendMessage(msg.chat.id, `❌ 폴더 없음: ${root}\n폴더를 먼저 생성하거나 /new_project 를 사용하세요`);
+  }
+
+  PROJECTS[name] = { session: `claude-${name}`, root, label: name };
+  fs.writeFileSync(PROJECTS_FILE, JSON.stringify(PROJECTS, null, 2));
+  bot.sendMessage(msg.chat.id, `✅ 추가됨: ${name}\n경로: ${root}`);
+});
+
+// /project-clean — 폴더 없는 프로젝트 일괄 정리
+bot.onText(/\/project-clean/, (msg) => {
+  if (!guard(msg.chat.id)) return;
+  PROJECTS = loadProjects();
+
+  const removed = [];
+  for (const [k, v] of Object.entries(PROJECTS)) {
+    if (!dirExists(v.root)) {
+      try { wsl(`tmux kill-session -t ${v.session} 2>/dev/null`); } catch {}
+      delete PROJECTS[k];
+      removed.push(k);
+    }
+  }
+
+  fs.writeFileSync(PROJECTS_FILE, JSON.stringify(PROJECTS, null, 2));
+
+  if (removed.length === 0) {
+    bot.sendMessage(msg.chat.id, `✅ 정리할 항목 없음`);
+  } else {
+    if (!PROJECTS[currentProject]) currentProject = Object.keys(PROJECTS)[0] || 'landing';
+    bot.sendMessage(msg.chat.id, `🗑 정리 완료:\n${removed.map(r => `• ${r}`).join('\n')}`);
   }
 });
 
