@@ -86,6 +86,46 @@ function sendLong(chatId, text) {
   return chunks.reduce((p, chunk) => p.then(() => bot.sendMessage(chatId, chunk)), Promise.resolve());
 }
 
+// ── 메시지 배치 시스템 (연속 메시지 결합) ────────
+const msgBatch = { texts: [], timer: null, chatId: null, proj: null };
+const BATCH_DELAY = 3000; // 3초 이내 연속 메시지 결합
+
+function batchMessage(chatId, proj, text) {
+  msgBatch.texts.push(text);
+  msgBatch.chatId = chatId;
+  msgBatch.proj = proj;
+
+  // 기존 타이머 리셋
+  if (msgBatch.timer) clearTimeout(msgBatch.timer);
+
+  // 3초 후 전송 (추가 메시지 없으면)
+  msgBatch.timer = setTimeout(() => {
+    const combined = msgBatch.texts.join('\n');
+    const { chatId: cid, proj: p } = msgBatch;
+
+    // 배치 초기화
+    msgBatch.texts = [];
+    msgBatch.timer = null;
+
+    try {
+      sendToSession(p.session, combined);
+      const preview = combined.slice(0, 80) + (combined.length > 80 ? '...' : '');
+      const batchNote = msgBatch.texts.length > 0 ? '' :
+        (combined.includes('\n') && combined.length > 200) ? ' (결합됨)' : '';
+      bot.sendMessage(cid, `📨 [${p.label}]${batchNote} ${preview}`);
+    } catch (e) {
+      bot.sendMessage(cid, `❌ 전송 실패: ${e.message}`);
+    }
+  }, BATCH_DELAY);
+
+  // 첫 메시지면 대기 표시
+  if (msgBatch.texts.length === 1) {
+    // 단일 메시지는 대기 표시 안함 (3초 후 바로 전송)
+  } else {
+    bot.sendMessage(chatId, `📎 메시지 ${msgBatch.texts.length}개 결합 중... (3초 대기)`);
+  }
+}
+
 async function startSession(chatId, proj) {
   try {
     wsl(`tmux new-session -d -s ${proj.session} -c ${proj.root} zsh -l`);
@@ -699,7 +739,7 @@ bot.on('message', async (msg) => {
   // 일반 / 명령은 스킵 (위 핸들러에서 처리)
   if (text.startsWith('/')) return;
 
-  // 일반 텍스트 → 현재 프로젝트로 전송
+  // 일반 텍스트 → 메시지 배치 후 전송 (연속 메시지 3초 이내 결합)
   const proj = getProject();
   if (!sessionExists(proj.session)) {
     return bot.sendMessage(msg.chat.id,
@@ -707,12 +747,7 @@ bot.on('message', async (msg) => {
     );
   }
 
-  try {
-    sendToSession(proj.session, text);
-    bot.sendMessage(msg.chat.id, `📨 [${proj.label}] ${text.slice(0, 80)}${text.length > 80 ? '...' : ''}`);
-  } catch (e) {
-    bot.sendMessage(msg.chat.id, `❌ 전송 실패: ${e.message}`);
-  }
+  batchMessage(msg.chat.id, proj, text);
 });
 
 // ── 글로벌 에러 핸들러 (크래시 방지) ────────────────
