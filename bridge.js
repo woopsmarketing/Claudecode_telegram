@@ -122,6 +122,7 @@ const mainMenu = {
         { text: '📁 프로젝트목록', callback_data: 'project_list' },
         { text: '🧹 없는것정리', callback_data: 'project_clean' },
         { text: '📸 스크린샷', callback_data: 'screenshot' },
+        { text: '🌐 ngrok', callback_data: 'ngrok' },
       ],
       // ── 모델 선택
       [
@@ -161,6 +162,7 @@ bot.setMyCommands([
   { command: 'project_add',    description: '기존 폴더 추가 (/project_add <이름>)' },
   { command: 'project_clean',  description: '없는 폴더 일괄 정리' },
   { command: 'model',          description: '모델 변경 (/model 1=Opus 2=Sonnet 3=Haiku)' },
+  { command: 'ngrok',          description: '현재 프로젝트 devPort를 외부 공개 (모바일 미리보기)' },
 ]);
 
 // ── Inline Keyboard 콜백 처리 ──────────────────
@@ -202,6 +204,27 @@ bot.on('callback_query', async (query) => {
     case 'logs':         handleLogs(chatId, proj); break;
     case 'project_list': handleProjectList(chatId); break;
     case 'screenshot':   handleScreenshot(chatId, proj, null); break;
+    case 'ngrok':
+      const ngrokPort = proj.devPort || 3000;
+      bot.sendMessage(chatId, `🌐 ngrok 시작 중... (port: ${ngrokPort})`);
+      try {
+        try { wsl(`pkill -f 'ngrok http' 2>/dev/null`); } catch {}
+        await new Promise(r => setTimeout(r, 1000));
+        wsl(`nohup ngrok http ${ngrokPort} > /tmp/ngrok.log 2>&1 &`);
+        await new Promise(r => setTimeout(r, 3000));
+        const ngrokResult = await wslAsync(
+          `curl -s http://localhost:4040/api/tunnels | python3 -c "import sys,json; t=json.load(sys.stdin)['tunnels']; print(next(x['public_url'] for x in t if 'https' in x['public_url']))" 2>/dev/null || echo ''`,
+          10000
+        );
+        if (ngrokResult && ngrokResult.startsWith('http')) {
+          bot.sendMessage(chatId, `✅ ngrok 터널!\n🔗 ${ngrokResult}\n\n모바일에서 이 URL로 접속 가능`);
+        } else {
+          bot.sendMessage(chatId, `⚠️ ngrok URL 확인 실패. WSL에서:\ncurl http://localhost:4040/api/tunnels`);
+        }
+      } catch (e) {
+        bot.sendMessage(chatId, `❌ ngrok 실패: ${e.message.slice(0, 150)}`);
+      }
+      break;
     case 'project_clean':
       // /project-clean 인라인 처리
       PROJECTS = loadProjects();
@@ -327,8 +350,9 @@ function handleProjectList(chatId) {
 }
 
 async function handleScreenshot(chatId, proj, customUrl) {
-  // 현재 프로젝트의 기본 URL
+  // 현재 프로젝트의 기본 URL (devPort 우선, 환경변수 fallback)
   const url = customUrl ||
+    (proj.devPort ? `http://localhost:${proj.devPort}` : null) ||
     process.env[`SCREENSHOT_URL_${currentProject.toUpperCase()}`] ||
     'http://localhost:3000';
 
@@ -609,6 +633,45 @@ bot.onText(/\/model(?:\s+(\d))?/, (msg, match) => {
 bot.onText(/\/screenshot(?:\s+(.+))?/, async (msg, match) => {
   if (!guard(msg.chat.id)) return;
   handleScreenshot(msg.chat.id, getProject(), match[1]?.trim() || null);
+});
+
+// /ngrok — 현재 프로젝트 devPort를 ngrok으로 외부 공개
+bot.onText(/\/ngrok(?:\s+(.+))?/, async (msg, match) => {
+  if (!guard(msg.chat.id)) return;
+  const proj = getProject();
+  const port = match[1]?.trim() || proj.devPort || 3000;
+
+  bot.sendMessage(msg.chat.id, `🌐 ngrok 시작 중... (port: ${port})`);
+
+  try {
+    // 기존 ngrok 종료
+    try { wsl(`pkill -f 'ngrok http' 2>/dev/null`); } catch {}
+    await new Promise(r => setTimeout(r, 1000));
+
+    // ngrok 백그라운드 시작
+    wsl(`nohup ngrok http ${port} > /tmp/ngrok.log 2>&1 &`);
+    await new Promise(r => setTimeout(r, 3000));
+
+    // ngrok API에서 URL 추출
+    const result = await wslAsync(
+      `curl -s http://localhost:4040/api/tunnels | python3 -c "import sys,json; t=json.load(sys.stdin)['tunnels']; print(next(t['public_url'] for t in t if 'https' in t['public_url']))" 2>/dev/null || echo ''`,
+      10000
+    );
+
+    if (result && result.startsWith('http')) {
+      bot.sendMessage(msg.chat.id,
+        `✅ ngrok 터널 열림!\n\n🔗 ${result}\n\n이 URL을 모바일에서 열면 현재 개발 서버가 보입니다.\n⚠️ dev server(npm run dev)가 실행 중이어야 합니다.`
+      );
+    } else {
+      bot.sendMessage(msg.chat.id,
+        `⚠️ ngrok이 시작됐지만 URL을 가져오지 못했습니다.\n\nWSL에서 확인: curl http://localhost:4040/api/tunnels\n\nngrok이 설치되지 않은 경우:\nnpm install -g ngrok\n또는\nwsl: snap install ngrok`
+      );
+    }
+  } catch (e) {
+    bot.sendMessage(msg.chat.id,
+      `❌ ngrok 실패: ${e.message.slice(0, 200)}\n\nngrok 설치 필요:\nhttps://ngrok.com/download`
+    );
+  }
 });
 
 // // 접두사 → Claude 슬래시 명령 (//context, //compact 등)

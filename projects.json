@@ -2,26 +2,43 @@
   "landing": {
     "session": "claude-landing",
     "root": "/mnt/d/Documents/landing_interior",
-    "label": "landing_interior"
+    "label": "landing_interior",
+    "devPort": 3000
   },
   "domain": {
     "session": "claude-domain",
     "root": "/mnt/d/Documents/domain_platform",
-    "label": "domain_platform"
+    "label": "domain_platform",
+    "devPort": 3001
   },
   "bridge": {
     "session": "claude-bridge",
     "root": "/mnt/d/Documents/Claudecode-telegram",
-    "label": "Claudecode-telegram"
+    "label": "Claudecode-telegram",
+    "devPort": 3002
   },
   "crawl-everything": {
     "session": "claude-crawl-everything",
     "root": "/mnt/d/Documents/crawl-everything",
-    "label": "crawl-everything"
+    "label": "crawl-everything",
+    "devPort": 3003
   },
   "naver_momcafe": {
     "session": "claude-naver_momcafe",
     "root": "/mnt/d/Documents/naver_momcafe",
-    "label": "naver_momcafe"
+    "label": "naver_momcafe",
+    "devPort": 3004
+  },
+  "test-subagent": {
+    "session": "claude-test-subagent",
+    "root": "/mnt/d/Documents/test-subagent",
+    "label": "test-subagent",
+    "devPort": 3005
+  },
+  "test-subagent-2": {
+    "session": "claude-test-subagent-2",
+    "root": "/mnt/d/Documents/test-subagent-2",
+    "label": "test-subagent-2",
+    "devPort": 3006
   }
 }
