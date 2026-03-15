@@ -178,15 +178,22 @@ print('devPort:', next_port)
 
 echo "6. Git 초기화 + GitHub 레포 생성"
 cd "${PROJECT_ROOT}"
+
+# git user 설정 확인 (없으면 기본값)
+if [ -z "$(git config --global user.email 2>/dev/null)" ]; then
+  git config --global user.email "vnfm0580@gmail.com"
+  git config --global user.name "vnfm0580"
+fi
+
 git init
 git add -A
-git commit -m "init: ${PROJECT_NAME} 프로젝트 생성" 2>/dev/null || true
+git commit -m "init: ${PROJECT_NAME} 프로젝트 생성"
 
-# gh CLI로 GitHub private 레포 자동 생성
-if command -v gh &> /dev/null; then
-  gh repo create "${PROJECT_NAME}" --private --source=. --push 2>/dev/null && echo "GitHub 레포 생성 완료" || echo "GitHub 레포 생성 스킵 (이미 존재하거나 gh 인증 필요)"
+# gh CLI로 GitHub public 레포 자동 생성
+if command -v gh &> /dev/null && gh auth status &>/dev/null; then
+  gh repo create "${PROJECT_NAME}" --public --source=. --push 2>&1 && echo "GitHub 레포 생성 + push 완료" || echo "GitHub 레포 생성 스킵 (이미 존재하거나 오류)"
 else
-  echo "gh CLI 없음 — GitHub 레포 수동 생성 필요"
+  echo "gh CLI 없거나 미인증 — GitHub 레포 수동 생성 필요"
 fi
 
 echo "7. nvm 로드"
