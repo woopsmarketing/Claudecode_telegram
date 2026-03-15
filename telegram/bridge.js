@@ -688,9 +688,12 @@ bot.on('message', async (msg) => {
     if (!sessionExists(proj.session)) {
       return bot.sendMessage(msg.chat.id, `❌ 세션 없음: /startclaude 로 시작하세요`);
     }
-    const escaped = claudeCmd.replace(/'/g, "'\\''");
-    wsl(`tmux send-keys -t ${proj.session} '${escaped}' Enter`);
-    return bot.sendMessage(msg.chat.id, `⌨️ [${proj.label}] ${claudeCmd}`);
+    try {
+      sendToSession(proj.session, claudeCmd);
+      return bot.sendMessage(msg.chat.id, `⌨️ [${proj.label}] ${claudeCmd.slice(0, 80)}`);
+    } catch (e) {
+      return bot.sendMessage(msg.chat.id, `❌ 전송 실패: ${e.message}`);
+    }
   }
 
   // 일반 / 명령은 스킵 (위 핸들러에서 처리)
@@ -710,6 +713,17 @@ bot.on('message', async (msg) => {
   } catch (e) {
     bot.sendMessage(msg.chat.id, `❌ 전송 실패: ${e.message}`);
   }
+});
+
+// ── 글로벌 에러 핸들러 (크래시 방지) ────────────────
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Uncaught Exception (계속 실행):', err.message);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('⚠️ Unhandled Rejection (계속 실행):', err.message || err);
+});
+bot.on('polling_error', (err) => {
+  console.error('⚠️ Polling Error:', err.message);
 });
 
 // ── Startup ──────────────────────────────────────
