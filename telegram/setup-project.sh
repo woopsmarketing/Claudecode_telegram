@@ -176,20 +176,33 @@ with open('${PROJECTS_JSON}', 'w') as f:
 print('devPort:', next_port)
 "
 
-echo "6. nvm 로드"
+echo "6. Git 초기화 + GitHub 레포 생성"
+cd "${PROJECT_ROOT}"
+git init
+git add -A
+git commit -m "init: ${PROJECT_NAME} 프로젝트 생성" 2>/dev/null || true
+
+# gh CLI로 GitHub private 레포 자동 생성
+if command -v gh &> /dev/null; then
+  gh repo create "${PROJECT_NAME}" --private --source=. --push 2>/dev/null && echo "GitHub 레포 생성 완료" || echo "GitHub 레포 생성 스킵 (이미 존재하거나 gh 인증 필요)"
+else
+  echo "gh CLI 없음 — GitHub 레포 수동 생성 필요"
+fi
+
+echo "7. nvm 로드"
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
-echo "7. tmux 세션 시작"
+echo "8. tmux 세션 시작"
 tmux kill-session -t "claude-${PROJECT_NAME}" 2>/dev/null || true
 tmux new-session -d -s "claude-${PROJECT_NAME}" -c "${PROJECT_ROOT}" bash -l
 sleep 2
 
-echo "8. claude 실행"
+echo "9. claude 실행"
 tmux send-keys -t "claude-${PROJECT_NAME}" 'claude' Enter
 sleep 7
 
-echo "9. trust 프롬프트 수락"
+echo "10. trust 프롬프트 수락"
 tmux send-keys -t "claude-${PROJECT_NAME}" '' Enter
 sleep 1
 
