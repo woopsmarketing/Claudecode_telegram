@@ -148,7 +148,7 @@ cat > "${PROJECT_ROOT}/.claude/settings.local.json" << 'SETTINGS'
         "hooks": [
           {
             "type": "command",
-            "command": "/mnt/d/Documents/Claudecode-telegram/notify.sh"
+            "command": "/mnt/d/Documents/Claudecode-telegram/telegram/notify.sh"
           }
         ]
       }

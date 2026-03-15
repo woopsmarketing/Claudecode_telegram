@@ -12,7 +12,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/mnt/d/Documents/Claudecode-telegram/notify.sh"
+            "command": "/mnt/d/Documents/Claudecode-telegram/telegram/notify.sh"
           }
         ]
       }

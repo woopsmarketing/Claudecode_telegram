@@ -5,7 +5,7 @@
 ### 1. bridge.js 시작 (PowerShell)
 ```bash
 cd D:\Documents\Claudecode-telegram
-node bridge.js
+node telegram/bridge.js
 ```
 
 ### 2. 프로젝트 세션 시작 (Telegram)
@@ -24,7 +24,7 @@ Hero 섹션 만들어줘  # 일반 메시지로 전송
 
 | 명령 | 설명 |
 |------|------|
-| `node bridge.js` | 브릿지 시작 (PowerShell) |
+| `node telegram/bridge.js` | 브릿지 시작 (PowerShell) |
 | `/menu` | Telegram 버튼 메뉴 |
 | `/status` | 세션 상태 확인 |
 | `/logs` | Claude 출력 확인 |

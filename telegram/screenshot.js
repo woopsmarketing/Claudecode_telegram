@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // screenshot.js — 현재 프로젝트 dev server 스크린샷 → Telegram 전송
-// 사용: node /mnt/d/Documents/Claudecode-telegram/screenshot.js [url] [caption]
+// 사용: node /mnt/d/Documents/Claudecode-telegram/telegram/screenshot.js [url] [caption]
 
 require('dotenv').config({ path: '/mnt/d/Documents/Claudecode-telegram/.env' });
 

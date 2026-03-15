@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const TelegramBot = require('node-telegram-bot-api');
 const { execSync, exec, execFile } = require('child_process');
 const fs = require('fs');
@@ -7,7 +7,7 @@ const path = require('path');
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_CHAT_ID = Number(process.env.ALLOWED_CHAT_ID);
 const BRIDGE_ROOT = '/mnt/d/Documents/Claudecode-telegram';
-const PROJECTS_FILE = path.join(__dirname, 'projects.json');
+const PROJECTS_FILE = path.join(__dirname, '..', 'projects.json');
 
 // ── 프로젝트 목록 동적 로딩 ────────────────────
 function loadProjects() {
@@ -374,7 +374,7 @@ async function handleScreenshot(chatId, proj, customUrl) {
 
   try {
     await wslAsync(
-      `node ${BRIDGE_ROOT}/screenshot.js '${url}' '📸 ${proj.label}'`,
+      `node ${BRIDGE_ROOT}/telegram/screenshot.js '${url}' '📸 ${proj.label}'`,
       30000
     );
     // screenshot.js가 직접 Telegram으로 이미지 전송
@@ -499,7 +499,7 @@ bot.onText(/\/new[_-]project(?:\s+(.+))?/, async (msg, match) => {
   }
 
   const name = rawName.replace(/[^a-zA-Z0-9_-]/g, '-');
-  const scriptPath = `${BRIDGE_ROOT}/setup-project.sh`;
+  const scriptPath = `${BRIDGE_ROOT}/telegram/setup-project.sh`;
 
   bot.sendMessage(msg.chat.id,
     `🔨 프로젝트 생성 중: ${name}\n⏳ 약 20초 소요...`
