@@ -1,64 +1,109 @@
-# CLAUDE.md
+# Claude Code Bridge & Framework
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Telegram 원격 제어 + Claude Code 프레임워크(에이전트/스킬/명령어) 통합 관리 프로젝트.
 
-## Repository Purpose
-
-This is a Claude Code framework configuration package — a curated collection of specialized agents, reusable skills, and scripts for Next.js/React development. It is not a buildable application.
-
-## Structure
+## 프로젝트 구조
 
 ```
-.claude/
-├── agents/          # 23 specialized agent definitions (Markdown)
-├── skills/          # 6 reusable skill packages
-│   ├── vercel-react-best-practices/
-│   ├── skill-creator/
-│   ├── hook-creator/
-│   ├── slash-command-creator/
-│   ├── subagent-creator/
-│   └── youtube-collector/
-├── scripts/         # Python/Bash automation scripts
-└── settings.local.json
+claudecode-telegram/
+│
+├── 📡 Telegram 원격 제어
+│   ├── bridge.js            # Telegram Bot ↔ Claude Code 브릿지 (핵심)
+│   ├── screenshot.js        # Playwright 스크린샷 → Telegram 전송
+│   ├── notify.sh            # Claude Stop hook → Telegram 완료 알림
+│   ├── setup-project.sh     # /new_project 자동 생성 스크립트
+│   ├── projects.json        # 다중 프로젝트 목록 (devPort 포함)
+│   └── .env                 # BOT_TOKEN, CHAT_ID
+│
+├── 🤖 Claude Code 프레임워크 (.claude/)
+│   ├── agents/              # 27개 전문 에이전트
+│   │   ├── spec-writer.md       # 요청 → 명세서 변환
+│   │   ├── implementer.md       # 명세서 → 에이전트 조율 구현
+│   │   ├── work-reporter.md     # 작업 완료 보고
+│   │   ├── error-diagnoser.md   # 에러 진단/수정
+│   │   └── ... (23개 더)
+│   ├── commands/            # 슬래시 명령어
+│   │   ├── do.md                # /do — 요청 → 명세 → 구현 워크플로
+│   │   ├── fix.md               # /fix — 에러 진단/수정
+│   │   └── done.md              # /done — 커밋 + 보고서
+│   ├── skills/              # 재사용 스킬 패키지
+│   │   ├── vercel-react-best-practices/  # 58개 성능 규칙
+│   │   ├── hook-creator/
+│   │   ├── skill-creator/
+│   │   ├── slash-command-creator/
+│   │   ├── subagent-creator/
+│   │   └── youtube-collector/
+│   ├── scripts/             # 유틸리티 스크립트
+│   │   └── optimize-image.js
+│   └── settings.local.json
+│
+├── 📋 프로젝트 관리 문서
+│   ├── CLAUDE.md            # 이 파일
+│   ├── CURRENT_STATE.md     # 현재 구현 상태
+│   ├── NEXT_TASK.md         # 다음 작업 목록
+│   ├── RUNBOOK.md           # 운영 매뉴얼
+│   └── PRD.md               # 원본 시스템 명세
+│
+└── 📝 prompt/               # Q&A 기록
 ```
 
-## Scripts (inside `.claude/scripts/`)
+## 주요 명령어
 
-```bash
-# Create a new skill scaffold
-python scripts/init_skill.py <skill-name> --path <output-directory>
+### Telegram 봇 명령
+| 명령 | 기능 |
+|------|------|
+| `/menu` | 전체 버튼 메뉴 |
+| `/project <이름>` | 프로젝트 전환 |
+| `/status` | 세션 상태 확인 |
+| `/startall` / `/stopall` | 전체 시작/종료 |
+| `/model 1/2/3` | 모델 변경 (Opus/Sonnet/Haiku) |
+| `/screenshot` | 현재 프로젝트 스크린샷 |
+| `/ngrok` | 외부 접속 URL 생성 |
+| `/new_project <이름>` | 새 프로젝트 생성 |
+| `//compact`, `//clear` 등 | Claude 내부 슬래시 명령 전달 |
 
-# Package a skill folder into a .skill file
-python scripts/package_skill.py <path/to/skill-folder>
+### Claude Code 슬래시 명령
+| 명령 | 기능 |
+|------|------|
+| `/do [요청]` | 요청 → spec-writer → implementer 워크플로 |
+| `/fix [에러]` | error-diagnoser로 에러 진단/수정 |
+| `/done [메모]` | git commit + 상태 업데이트 + 보고서 |
 
-# Create a new slash command
-python scripts/init_command.py <command-name> [--scope project|personal]
+## 아키텍처
 
-# Configure YouTube API key (for youtube-collector skill)
-python scripts/setup_api_key.py [--api-key KEY | --show]
+```
+📱 Telegram
+    ↓ (Telegram Bot API)
+💻 bridge.js (Windows Node.js)
+    ↓ (wsl.exe -d Ubuntu)
+🐧 WSL2 Ubuntu
+    ↓ (tmux send-keys)
+🤖 Claude Code CLI (각 프로젝트 세션)
+    ↓ (Stop hook)
+📢 notify.sh → Telegram 완료 알림
 ```
 
-## Agent Architecture
+## 프레임워크 배포 흐름
 
-Agents are Markdown files in `.claude/agents/` that follow a consistent pattern:
-- **Frontmatter**: `name`, `description`, `tools` fields
-- **Role & Expertise**: Domain-specific instructions
-- **Task patterns**: Step-by-step workflows for common scenarios
-- Most agent documentation is written in Korean
+```
+이 프로젝트의 .claude/ 수정
+    ↓
+/new_project 실행 시
+    ↓
+setup-project.sh → .claude/ 전체 복사
+    ↓
+새 프로젝트에 에이전트/명령어/스킬 배포됨
+```
 
-## Skill Architecture
+에이전트나 스킬을 여기서 수정하면 이후 생성되는 모든 프로젝트에 반영.
+기존 프로젝트에는 수동 복사 필요: `cp -r .claude/agents/ /mnt/d/Documents/<프로젝트>/.claude/`
 
-Each skill in `.claude/skills/<name>/` contains:
-- `SKILL.md` — Primary skill manifest with the `<skill-name>` XML tag triggers
-- `HOOKS.md` (optional) — Pre/post execution hooks
-- Python scripts (optional, e.g., youtube-collector)
+## 환경
 
-Skills are triggered by their XML tag in user messages (e.g., `<vercel-react-best-practices>`).
+- **Runtime**: Windows Node.js + WSL2 Ubuntu
+- **패키지**: node-telegram-bot-api, playwright, dotenv, form-data
+- **Claude CLI**: WSL Ubuntu에서 nvm으로 설치
+- **퍼미션**: bypassPermissions (settings.local.json)
 
-## Permissions
-
-`settings.local.json` sets `defaultMode: "bypassPermissions"` with `Bash(*)` allowed — all tool calls run without prompting.
-
-## Focus Domain
-
-All agents and skills target the **Next.js / React / TypeScript / Tailwind CSS / Vercel** stack. The `vercel-react-best-practices` skill encodes 58 performance rules across bundle optimization, async patterns, rendering strategies, and server/client component boundaries.
+# currentDate
+Today's date is 2026-03-15.
