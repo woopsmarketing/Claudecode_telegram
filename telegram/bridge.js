@@ -204,6 +204,33 @@ bot.on('callback_query', async (query) => {
     case 'logs':         handleLogs(chatId, proj); break;
     case 'project_list': handleProjectList(chatId); break;
     case 'screenshot':   handleScreenshot(chatId, proj, null); break;
+    case 'git_diff':
+      try {
+        const stat = wsl(`cd "${proj.root}" && git diff --stat HEAD 2>/dev/null`);
+        const diffLines = wsl(`cd "${proj.root}" && git diff HEAD 2>/dev/null | head -80 | cat`);
+        const out = [stat, diffLines].filter(Boolean).join('\n\n') || '변경사항 없음';
+        sendLong(chatId, `[${proj.label}] git diff:\n${out}`);
+      } catch (e) {
+        bot.sendMessage(chatId, `❌ git diff 실패: ${e.message}`);
+      }
+      break;
+    case 'dev_restart':
+      try {
+        const devPort = proj.devPort || 3000;
+        bot.sendMessage(chatId, `🔄 [${proj.label}] dev 서버 재시작 중... (port: ${devPort})`);
+        try { wsl(`fuser -k ${devPort}/tcp 2>/dev/null || true`); } catch {}
+        await new Promise(r => setTimeout(r, 1000));
+        if (sessionExists(proj.session)) {
+          wsl(`tmux send-keys -t ${proj.session} 'npm run dev 2>/dev/null || pnpm dev 2>/dev/null &' Enter`);
+          await new Promise(r => setTimeout(r, 2000));
+          bot.sendMessage(chatId, `✅ dev 서버 재시작됨 (port: ${devPort})`);
+        } else {
+          bot.sendMessage(chatId, `❌ 세션 없음: /startclaude 로 먼저 시작하세요`);
+        }
+      } catch (e) {
+        bot.sendMessage(chatId, `❌ dev 재시작 실패: ${e.message}`);
+      }
+      break;
     case 'ngrok':
       const ngrokPort = proj.devPort || 3000;
       bot.sendMessage(chatId, `🌐 ngrok 시작 중... (port: ${ngrokPort})`);
@@ -272,8 +299,8 @@ bot.on('callback_query', async (query) => {
 
 function dirExists(wslPath) {
   try {
-    wsl(`[ -d "${wslPath}" ] && echo yes`);
-    return true;
+    const result = wsl(`[ -d "${wslPath}" ] && echo yes || echo no`);
+    return result.trim() === 'yes';
   } catch { return false; }
 }
 
@@ -530,7 +557,7 @@ bot.onText(/\/new[_-]project(?:\s+(.+))?/, async (msg, match) => {
 });
 
 // /project-remove <name> — projects.json에서 제거
-bot.onText(/\/project-remove\s+(.+)/, (msg, match) => {
+bot.onText(/\/project[_-]remove\s+(.+)/, (msg, match) => {
   if (!guard(msg.chat.id)) return;
   const name = match[1].trim();
   PROJECTS = loadProjects();
@@ -551,7 +578,7 @@ bot.onText(/\/project-remove\s+(.+)/, (msg, match) => {
 });
 
 // /project-add <name> — 기존 폴더를 projects.json에 추가
-bot.onText(/\/project-add\s+(.+)/, (msg, match) => {
+bot.onText(/\/project[_-]add\s+(.+)/, (msg, match) => {
   if (!guard(msg.chat.id)) return;
   const name = match[1].trim();
   const root = `/mnt/d/Documents/${name}`;
@@ -570,8 +597,8 @@ bot.onText(/\/project-add\s+(.+)/, (msg, match) => {
   bot.sendMessage(msg.chat.id, `✅ 추가됨: ${name}\n경로: ${root}`);
 });
 
-// /project-clean — 폴더 없는 프로젝트 일괄 정리
-bot.onText(/\/project-clean/, (msg) => {
+// /project-clean 또는 /project_clean — 폴더 없는 프로젝트 일괄 정리
+bot.onText(/\/project[_-]clean/, (msg) => {
   if (!guard(msg.chat.id)) return;
   PROJECTS = loadProjects();
 
@@ -733,3 +760,8 @@ for (const [k, v] of Object.entries(PROJECTS)) {
   console.log(`   ${k === currentProject ? '▶' : ' '} ${k}: ${v.root}`);
 }
 console.log(`   Allowed Chat ID: ${ALLOWED_CHAT_ID}`);
+
+// 시작 알림 전송
+if (ALLOWED_CHAT_ID) {
+  bot.sendMessage(ALLOWED_CHAT_ID, `🟢 Bridge 시작됨\n${new Date().toLocaleString('ko-KR')}`).catch(() => {});
+}

@@ -29,16 +29,21 @@
     "label": "naver_momcafe",
     "devPort": 3004
   },
-  "test-subagent": {
-    "session": "claude-test-subagent",
-    "root": "/mnt/d/Documents/test-subagent",
-    "label": "test-subagent",
-    "devPort": 3005
+  "test-github": {
+    "session": "claude-test-github",
+    "root": "/mnt/d/Documents/test-github",
+    "label": "test-github",
+    "devPort": 3010
   },
-  "test-subagent-2": {
-    "session": "claude-test-subagent-2",
-    "root": "/mnt/d/Documents/test-subagent-2",
-    "label": "test-subagent-2",
-    "devPort": 3006
+  "webzzirasi": {
+    "session": "claude-webzzirasi",
+    "root": "/mnt/d/Documents/webzzirasi",
+    "label": "webzzirasi"
+  },
+  "share_item": {
+    "session": "claude-share_item",
+    "root": "/mnt/d/Documents/share_item",
+    "label": "share_item",
+    "devPort": 3011
   }
 }

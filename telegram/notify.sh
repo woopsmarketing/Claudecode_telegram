@@ -146,10 +146,35 @@ if [ -n "$CHANGED_FILES" ] && [ "$FILE_COUNT" -gt 0 ]; then
   MESSAGE+="${CHANGED_FILES}"
 fi
 
-# ── Telegram 전송 ──
+# ── Telegram 전송 (inline keyboard 포함) ──
+MESSAGE_JSON=$(echo "$MESSAGE" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))")
+
 curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
   -H "Content-Type: application/json" \
   -d "{
     \"chat_id\": \"${ALLOWED_CHAT_ID}\",
-    \"text\": $(echo "$MESSAGE" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))")
+    \"text\": ${MESSAGE_JSON},
+    \"reply_markup\": {
+      \"inline_keyboard\": [
+        [
+          {\"text\": \"📋 로그\", \"callback_data\": \"logs\"},
+          {\"text\": \"📸 스크린샷\", \"callback_data\": \"screenshot\"},
+          {\"text\": \"📊 상태\", \"callback_data\": \"status\"}
+        ],
+        [
+          {\"text\": \"↩️ /undo\", \"callback_data\": \"cc_undo\"},
+          {\"text\": \"🔧 /compact\", \"callback_data\": \"cc_compact\"},
+          {\"text\": \"📈 /context\", \"callback_data\": \"cc_context\"}
+        ],
+        [
+          {\"text\": \"📝 git diff\", \"callback_data\": \"git_diff\"},
+          {\"text\": \"✅ /done\", \"callback_data\": \"cc_done\"},
+          {\"text\": \"🛠 /fix\", \"callback_data\": \"cc_fix\"}
+        ],
+        [
+          {\"text\": \"🔄 dev 재시작\", \"callback_data\": \"dev_restart\"},
+          {\"text\": \"🌐 ngrok\", \"callback_data\": \"ngrok\"}
+        ]
+      ]
+    }
   }" > /dev/null 2>&1
